@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import kagglehub
+import numpy as np
 
 
 # ============================================================
@@ -21,13 +22,15 @@ st.set_page_config(
 
 st.markdown("""
 <style>
+
 :root {
     color-scheme: light;
 }
+
 .stApp {
     background-color: #F8F9FA;
 }
-s
+
 .block-container {
     padding-top: 2rem;
     padding-bottom: 3rem;
@@ -230,7 +233,7 @@ comparer_genres = st.sidebar.multiselect(
 
 
 # ============================================================
-# 6. DONNÉES FILTRÉES POUR LA VUE GÉNÉRALE
+# 6. DONNÉES FILTRÉES
 # ============================================================
 
 df_filtered = df.copy()
@@ -241,16 +244,14 @@ df_filtered = df.copy()
 if genre_selectionne != "Tous les genres":
 
     df_filtered = df_filtered[
-        df_filtered["track_genre"]
-        == genre_selectionne
+        df_filtered["track_genre"] == genre_selectionne
     ]
 
 
 # Filtre popularité
 
 df_filtered = df_filtered[
-    df_filtered["popularity"]
-    >= popularite_min
+    df_filtered["popularity"] >= popularite_min
 ]
 
 
@@ -277,13 +278,22 @@ df_filtered = df_filtered[
 ]
 
 
-# Filtre recherche (titre ou artiste)
+# Recherche titre / artiste
 
 if recherche:
 
     masque_recherche = (
-        df_filtered["track_name"].str.contains(recherche, case=False, na=False)
-        | df_filtered["artists"].str.contains(recherche, case=False, na=False)
+        df_filtered["track_name"].str.contains(
+            recherche,
+            case=False,
+            na=False
+        )
+        |
+        df_filtered["artists"].str.contains(
+            recherche,
+            case=False,
+            na=False
+        )
     )
 
     df_filtered = df_filtered[masque_recherche]
@@ -302,26 +312,22 @@ if df_filtered.empty:
 # 7. KPI
 # ============================================================
 
-popularite_moyenne = (
-    df_filtered["popularity"].mean()
-)
+popularite_moyenne = df_filtered["popularity"].mean()
 
 pourcentage_populaire = (
-    (df_filtered["popularity"] > 50)
-    .mean()
+    (df_filtered["popularity"] > 50).mean()
     * 100
 )
 
 
-# Genre le plus populaire sur le dataset filtré
-# par popularité + contenu, mais sans filtre genre
+# Calcul du genre en tête sans appliquer le filtre genre
 
 df_kpi_genre = df.copy()
 
 df_kpi_genre = df_kpi_genre[
-    df_kpi_genre["popularity"]
-    >= popularite_min
+    df_kpi_genre["popularity"] >= popularite_min
 ]
+
 
 if explicit_filter == "Explicit":
 
@@ -334,6 +340,7 @@ elif explicit_filter == "Non explicit":
     df_kpi_genre = df_kpi_genre[
         df_kpi_genre["explicit"] == False
     ]
+
 
 df_kpi_genre = df_kpi_genre[
     (df_kpi_genre["tempo"] >= tempo_range[0])
@@ -445,29 +452,75 @@ with tab1:
         "Comment se répartit la popularité des titres ?"
     )
 
-    fig_pop = px.histogram(
-        df_filtered,
-        x="popularity",
-        nbins=20
+    # Création de 10 tranches de popularité
+    counts, bins = np.histogram(
+        df_filtered["popularity"],
+        bins=10,
+        range=(0, 100)
     )
 
-    fig_pop.update_traces(
-        marker_color="#1DB954"
+    hist_df = pd.DataFrame({
+        "debut": bins[:-1],
+        "fin": bins[1:],
+        "nombre": counts
+    })
+
+    # Nom des tranches
+    hist_df["intervalle"] = hist_df.apply(
+        lambda x: (
+            f"{int(x['debut'])}-{int(x['fin'])}"
+        ),
+        axis=1
+    )
+
+    # Identification du minimum et du maximum
+    min_index = hist_df["nombre"].idxmin()
+    max_index = hist_df["nombre"].idxmax()
+
+    # Toutes les barres sont grises au départ
+    hist_df["niveau"] = "Autres"
+
+    # Minimum = rouge
+    hist_df.loc[min_index, "niveau"] = "Minimum"
+
+    # Maximum = vert
+    hist_df.loc[max_index, "niveau"] = "Maximum"
+
+    # Graphique
+    fig_pop = px.bar(
+        hist_df,
+        x="intervalle",
+        y="nombre",
+        color="niveau",
+        color_discrete_map={
+            "Maximum": "#1DB954",
+            "Minimum": "#EF4444",
+            "Autres": "#D1D5DB"
+        },
+        labels={
+            "intervalle": "Popularité",
+            "nombre": "Nombre de titres",
+            "niveau": ""
+        },
+        hover_data={
+            "debut": False,
+            "fin": False,
+            "niveau": False
+        }
     )
 
     fig_pop.update_layout(
         xaxis_title="Popularité (0 à 100)",
         yaxis_title="Nombre de titres",
-        showlegend=False,
         plot_bgcolor="white",
         paper_bgcolor="white",
-        height=480,
-        bargap=0.03
+        height=500,
+        bargap=0.03,
+        legend_title_text=""
     )
 
     fig_pop.update_xaxes(
-        showgrid=False,
-        range=[0, 100]
+        showgrid=False
     )
 
     fig_pop.update_yaxes(
@@ -480,7 +533,26 @@ with tab1:
     )
 
 
-    # INTERPRÉTATION
+    # Informations min / max
+
+    col_max, col_min = st.columns(2)
+
+    with col_max:
+
+        st.success(
+            f"🟢 **Maximum : {hist_df.loc[max_index, 'intervalle']}**  \n"
+            f"{hist_df.loc[max_index, 'nombre']:,} titres"
+        )
+
+    with col_min:
+
+        st.error(
+            f"🔴 **Minimum : {hist_df.loc[min_index, 'intervalle']}**  \n"
+            f"{hist_df.loc[min_index, 'nombre']:,} titres"
+        )
+
+
+    # Interprétation
 
     if popularite_moyenne < 30:
 
@@ -537,22 +609,17 @@ with tab2:
     )
 
 
-    # IMPORTANT :
-    # on repart du dataset complet
-    # pour pouvoir comparer les genres
-
     df_genres = df.copy()
 
 
-    # On garde le filtre popularité
+    # Popularité
 
     df_genres = df_genres[
-        df_genres["popularity"]
-        >= popularite_min
+        df_genres["popularity"] >= popularite_min
     ]
 
 
-    # On garde le filtre Explicit
+    # Explicit
 
     if explicit_filter == "Explicit":
 
@@ -566,13 +633,16 @@ with tab2:
             df_genres["explicit"] == False
         ]
 
+
+    # Tempo
+
     df_genres = df_genres[
         (df_genres["tempo"] >= tempo_range[0])
         & (df_genres["tempo"] <= tempo_range[1])
     ]
 
 
-    # Statistiques par genre
+    # Statistiques
 
     genre_stats = (
         df_genres
@@ -582,7 +652,6 @@ with tab2:
                 "popularity",
                 "mean"
             ),
-
             nombre_titres=(
                 "track_id",
                 "count"
@@ -592,32 +661,33 @@ with tab2:
     )
 
 
-    # Minimum 20 titres pour éviter
-    # les comparaisons sur des échantillons minuscules
-
     genre_stats = genre_stats[
         genre_stats["nombre_titres"] >= 20
     ]
 
 
-    if comparer_genres:
+    # Comparaison manuelle ou Top 10
 
-        # Mode comparaison manuelle : seulement les genres
-        # choisis dans la sidebar, dans l'ordre décroissant
+    if comparer_genres:
 
         genre_stats = (
             genre_stats[
-                genre_stats["track_genre"].isin(comparer_genres)
+                genre_stats["track_genre"].isin(
+                    comparer_genres
+                )
             ]
-            .sort_values("popularite_moyenne", ascending=False)
+            .sort_values(
+                "popularite_moyenne",
+                ascending=False
+            )
             .copy()
         )
 
-        titre_top10 = "🎯 Comparaison des genres sélectionnés"
+        titre_top10 = (
+            "🎯 Comparaison des genres sélectionnés"
+        )
 
     else:
-
-        # Mode automatique : Top 10
 
         genre_stats = (
             genre_stats
@@ -631,21 +701,18 @@ with tab2:
 
         titre_top10 = "🔟 Top 10 des genres"
 
+
     st.caption(titre_top10)
 
 
     if genre_stats.empty:
 
         st.warning(
-            "Pas assez de données pour comparer les genres "
-            "avec les filtres actuels (essayez un genre "
-            "avec au moins 20 titres)."
+            "Pas assez de données pour comparer "
+            "les genres avec les filtres actuels."
         )
 
     else:
-
-        # Premier genre = vert
-        # autres = gris
 
         genre_stats["groupe"] = "Autres genres"
 
@@ -657,34 +724,25 @@ with tab2:
 
         fig_genre = px.bar(
             genre_stats,
-
             x="popularite_moyenne",
-
             y="track_genre",
-
             orientation="h",
-
             color="groupe",
-
             color_discrete_map={
                 "Genre en tête": "#1DB954",
                 "Autres genres": "#D8DDE3"
             },
-
             hover_data={
                 "nombre_titres": True,
                 "groupe": False
             },
-
             labels={
                 "popularite_moyenne":
-                "Popularité moyenne",
-
+                    "Popularité moyenne",
                 "track_genre":
-                "Genre",
-
+                    "Genre",
                 "nombre_titres":
-                "Nombre de titres"
+                    "Nombre de titres"
             }
         )
 
@@ -696,10 +754,9 @@ with tab2:
             plot_bgcolor="white",
             paper_bgcolor="white",
             height=500,
-
             yaxis={
                 "categoryorder":
-                "total ascending"
+                    "total ascending"
             }
         )
 
@@ -758,31 +815,31 @@ with tab3:
     variables_audio = {
 
         "Dansabilité":
-        "danceability",
+            "danceability",
 
         "Énergie":
-        "energy",
+            "energy",
 
         "Positivité":
-        "valence",
+            "valence",
 
         "Acoustique":
-        "acousticness",
+            "acousticness",
 
         "Présence de paroles":
-        "speechiness",
+            "speechiness",
 
         "Son live":
-        "liveness",
+            "liveness",
 
         "Instrumental":
-        "instrumentalness",
+            "instrumentalness",
 
         "Volume sonore":
-        "loudness",
+            "loudness",
 
         "Tempo":
-        "tempo"
+            "tempo"
     }
 
 
@@ -796,13 +853,14 @@ with tab3:
         variable_nom
     ]
 
+
     afficher_tendance = st.checkbox(
         "📈 Afficher la droite de tendance",
         value=False
     )
 
 
-    # CORRÉLATION
+    # Corrélation
 
     correlation = (
         df_filtered[
@@ -813,8 +871,7 @@ with tab3:
     )
 
 
-    # Échantillon pour rendre
-    # le graphique plus fluide
+    # Échantillon pour la fluidité
 
     if len(df_filtered) > 4000:
 
@@ -830,23 +887,20 @@ with tab3:
 
     fig_audio = px.scatter(
         df_graph,
-
         x=variable,
-
         y="popularity",
-
         hover_data=[
             "track_name",
             "artists",
             "track_genre"
         ],
-
         opacity=0.30,
-
-        trendline="ols" if afficher_tendance else None,
-
+        trendline=(
+            "ols"
+            if afficher_tendance
+            else None
+        ),
         trendline_color_override="#191414",
-
         labels={
             variable: variable_nom,
             "popularity": "Popularité"
@@ -887,23 +941,32 @@ with tab3:
     )
 
 
-    # INTERPRÉTATION
+    # Interprétation corrélation
 
-    if abs(correlation) < 0.10:
+    if pd.isna(correlation):
 
-        force_relation = "très faible"
-
-    elif abs(correlation) < 0.30:
-
-        force_relation = "faible"
-
-    elif abs(correlation) < 0.50:
-
-        force_relation = "modérée"
+        force_relation = "non calculable"
+        correlation_affichage = "N/A"
 
     else:
 
-        force_relation = "forte"
+        correlation_affichage = f"{correlation:.2f}"
+
+        if abs(correlation) < 0.10:
+
+            force_relation = "très faible"
+
+        elif abs(correlation) < 0.30:
+
+            force_relation = "faible"
+
+        elif abs(correlation) < 0.50:
+
+            force_relation = "modérée"
+
+        else:
+
+            force_relation = "forte"
 
 
     col_a, col_b = st.columns(
@@ -915,7 +978,7 @@ with tab3:
 
         st.metric(
             "🔗 Corrélation",
-            f"{correlation:.2f}"
+            correlation_affichage
         )
 
 
@@ -961,6 +1024,7 @@ with tab4:
         "pour réduire la liste."
     )
 
+
     colonnes_a_afficher = [
         "track_name",
         "artists",
@@ -973,21 +1037,32 @@ with tab4:
         "explicit"
     ]
 
+
     tri_par = st.selectbox(
         "Trier par",
         colonnes_a_afficher,
-        index=colonnes_a_afficher.index("popularity")
+        index=colonnes_a_afficher.index(
+            "popularity"
+        )
     )
+
 
     ordre_desc = st.toggle(
         "Ordre décroissant",
         value=True
     )
 
+
     df_table = (
-        df_filtered[colonnes_a_afficher]
-        .sort_values(tri_par, ascending=not ordre_desc)
+        df_filtered[
+            colonnes_a_afficher
+        ]
+        .sort_values(
+            tri_par,
+            ascending=not ordre_desc
+        )
     )
+
 
     st.dataframe(
         df_table,
@@ -996,9 +1071,12 @@ with tab4:
         height=430
     )
 
+
     st.download_button(
         "⬇️ Télécharger cette sélection (CSV)",
-        data=df_table.to_csv(index=False).encode("utf-8"),
+        data=df_table.to_csv(
+            index=False
+        ).encode("utf-8"),
         file_name="titres_filtres.csv",
         mime="text/csv"
     )
@@ -1017,19 +1095,12 @@ st.markdown("""
 
 <strong>
 Le succès d'un titre ne se résume pas à son profil audio.
-</strong>
-
-<br><br>
-
 Le dashboard montre des différences de popularité entre
 les genres. En revanche, les caractéristiques audio prises
 individuellement présentent des relations limitées avec
 la popularité.
-
-<br><br>
-
 Cela suggère que d'autres dimensions doivent également
 être prises en compte pour comprendre le succès d'un titre.
-
+</strong>
 </div>
 """, unsafe_allow_html=True)

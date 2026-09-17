@@ -21,11 +21,13 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-
+:root {
+    color-scheme: light;
+}
 .stApp {
     background-color: #F8F9FA;
 }
-
+s
 .block-container {
     padding-top: 2rem;
     padding-bottom: 3rem;
@@ -56,7 +58,7 @@ h2, h3 {
 }
 
 [data-testid="stMetricValue"] {
-    color: #1DB954;
+    color: #b91d34;
     font-size: 31px;
     font-weight: 700;
 }
